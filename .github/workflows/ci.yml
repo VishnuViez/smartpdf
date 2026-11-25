@@ -1,0 +1,65 @@
+# ------------------------------------------------------------------
+# SmartPDF – Continuous Integration (CI)
+#
+# What this does, in plain words:
+#   Every time code is pushed to `main`, or someone opens a pull
+#   request, GitHub borrows a fresh Linux computer, downloads the
+#   code, installs the packages, and checks two things:
+#     1. Lint  – does the code follow the project's style/safety rules?
+#     2. Build – does the Next.js app actually compile?
+#   If either step fails, GitHub shows a red ❌ on the commit/PR.
+#   If both pass, you get a green ✅.
+#
+# Deployment (the "CD" part) is done by Netlify (see netlify.toml),
+# which builds and publishes the site whenever `main` changes.
+# ------------------------------------------------------------------
+
+name: CI                      # The name shown in the repo's "Actions" tab
+
+on:                           # WHEN should this run?
+  push:
+    branches: [main]          #   - on every push to main
+  pull_request:               #   - on every pull request (any branch)
+  workflow_dispatch:          #   - and manually, via a "Run workflow" button
+
+# If you push twice quickly, cancel the older run instead of wasting time on it
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read              # The job only needs to READ the code (safer)
+
+jobs:
+  build:                      # A "job" = one set of steps on one machine
+    name: Lint & build
+    runs-on: ubuntu-latest    # The borrowed computer: a fresh Ubuntu Linux VM
+    timeout-minutes: 15       # Give up if something hangs
+
+    steps:
+      # 1. Download this repo's code onto the VM
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      # 2. Install Node.js and remember downloaded npm packages between runs
+      #    (the cache makes later runs much faster)
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      # 3. Install exact package versions from package-lock.json
+      #    (`npm ci` is the "clean install" made for CI machines)
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. Check code quality with ESLint (fails on errors, not on warnings)
+      - name: Lint
+        run: npm run lint
+
+      # 5. Make sure the production build compiles
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1   # Don't send Next.js usage stats from CI
