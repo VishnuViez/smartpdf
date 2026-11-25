@@ -1,6 +1,48 @@
+# ---------------------------------------------------------------------------
+# SmartPDF — Netlify deployment (the "CD" half)
+#
+# Netlify watches this repo directly. On every push to `main` it builds and
+# publishes to production; on every pull request it builds a Deploy Preview at
+# its own throwaway URL.
+#
+# IMPORTANT — Netlify and GitHub Actions do not talk to each other.
+# Netlify will happily deploy a commit whose CI run is red. The thing that
+# prevents that is branch protection on `main`: if nothing can merge without
+# a green CI run, then every commit Netlify ever sees has already passed.
+# Without branch protection, CI is advice; with it, CI is a gate.
+#
+# The Node version is NOT set here on purpose. It comes from .nvmrc, which
+# Netlify reads at the top of its precedence chain:
+#   .nvmrc > .node-version > NODE_VERSION env var > UI setting > image default
+# One file, read by both Netlify and GitHub Actions, so they cannot drift.
+# ---------------------------------------------------------------------------
+
 [build]
   command = "npm run build"
   publish = ".next"
 
+# Teaches Netlify how to host a Next.js app with server-side routes
+# (/api/gemini and /api/checkout) rather than as flat static files.
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+# ---------------------------------------------------------------------------
+# Deploy contexts: the same repo built differently depending on where it lands.
+# ---------------------------------------------------------------------------
+
+[build.environment]
+  # Don't phone home from a build machine.
+  NEXT_TELEMETRY_DISABLED = "1"
+
+[context.production]
+  # Nothing extra today. Production-only secrets (GEMINI_API_KEY,
+  # STRIPE_SECRET_KEY) are set in the Netlify UI, never in this file —
+  # this file is public, the UI store is not.
+
+[context.deploy-preview]
+  # Builds for pull requests. Point these at test/sandbox credentials in the
+  # Netlify UI so a PR preview can never charge a real card or spend real
+  # API quota.
+
+[context.branch-deploy]
+  # Any other branch Netlify is configured to build.

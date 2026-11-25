@@ -5,6 +5,7 @@ import { ArrowLeft, Layers, CheckCircle, Download, Trash2, GripVertical } from "
 import Header from "../../components/Header";
 import Dropzone from "../../components/Dropzone";
 import { organizePDF, formatFileSize, downloadBlob } from "../../lib/pdf-utils";
+import { loadPdfjs, PDFJS_ASSETS } from "../../lib/pdf/pdfjs.js";
 
 export default function OrganizePage() {
   const [file, setFile] = useState(null);
@@ -12,6 +13,7 @@ export default function OrganizePage() {
   const [thumbnails, setThumbnails] = useState([]);
   const [result, setResult] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const handleFiles = useCallback(async (files) => {
@@ -19,11 +21,10 @@ export default function OrganizePage() {
     setResult(null);
     setLoading(true);
 
-    const pdfjsLib = await import("pdfjs-dist");
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+    const pdfjsLib = await loadPdfjs();
 
     const arrayBuffer = await files[0].arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, ...PDFJS_ASSETS }).promise;
     const pageCount = pdf.numPages;
     const thumbs = [];
     const pageOrder = [];
@@ -66,7 +67,7 @@ export default function OrganizePage() {
     try {
       const res = await organizePDF(file, pages);
       setResult(res);
-    } catch (e) { alert("Error: " + e.message); }
+    } catch (e) { setError(e?.name === "EncryptedDocumentError" ? e.message : (e?.message || String(e))); }
     setProcessing(false);
   };
 
@@ -89,6 +90,7 @@ export default function OrganizePage() {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 12, marginBottom: 24 }}>
                   {thumbnails.map((thumb, idx) => (
                     <div key={idx} style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 8, textAlign: "center", position: "relative" }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={thumb} alt={`Page ${pages[idx] + 1}`} style={{ width: "100%", borderRadius: 4, marginBottom: 6 }} />
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: "0.75rem" }}>
                         <button onClick={() => movePage(idx, idx - 1)} disabled={idx === 0} style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: "1rem" }}>←</button>

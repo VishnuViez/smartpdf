@@ -4,11 +4,14 @@ import Link from "next/link";
 import { ArrowLeft, ScanText, CheckCircle, Download, Bot, Loader2, Copy, Check } from "lucide-react";
 import Header from "../../components/Header";
 import Dropzone from "../../components/Dropzone";
+import CloudNotice from "../../components/CloudNotice";
+import { loadPdfjs, PDFJS_ASSETS } from "../../lib/pdf/pdfjs.js";
 
 export default function OcrPage() {
   const [file, setFile] = useState(null);
   const [extractedText, setExtractedText] = useState("");
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [progress, setProgress] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -19,11 +22,10 @@ export default function OcrPage() {
     setProcessing(true);
     setProgress("Rendering PDF pages...");
     try {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+      const pdfjsLib = await loadPdfjs();
 
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, ...PDFJS_ASSETS }).promise;
       const allText = [];
 
       for (let i = 1; i <= pdf.numPages; i++) {
@@ -43,13 +45,18 @@ export default function OcrPage() {
           body: JSON.stringify({ imageBase64: base64, operation: "ocr" }),
         });
 
-        if (!res.ok) throw new Error("AI OCR failed");
+        if (!res.ok) {
+          // surface what the server actually said — a missing API key is the
+          // common case and the user can do something about it
+          const detail = await res.json().catch(() => null);
+          throw new Error(detail?.error || `The OCR service returned ${res.status}`);
+        }
         const data = await res.json();
         allText.push(`--- Page ${i} ---\n${data.text}`);
       }
 
       setExtractedText(allText.join("\n\n"));
-    } catch (e) { alert("Error: " + e.message); }
+    } catch (e) { setError(e?.message || String(e)); }
     setProcessing(false);
     setProgress("");
   };
@@ -81,6 +88,8 @@ export default function OcrPage() {
           <span className="tool-tag tag-ai"><Bot size={12} /> AI-Powered</span>
         </div>
 
+        <CloudNotice />
+
         <Dropzone onFiles={handleFiles} accept=".pdf" multiple={false} label="Drop your scanned PDF here" sublabel="AI will read and extract all text" />
 
         {file && !extractedText && (
@@ -88,6 +97,7 @@ export default function OcrPage() {
             <button className="btn-primary" onClick={handleProcess} disabled={processing}>
               {processing ? <><Loader2 size={16} className="spin" /> {progress}</> : "Extract Text (OCR)"}
             </button>
+            {error && <div className="ed-error">{error}</div>}
           </div>
         )}
 

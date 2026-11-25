@@ -10,6 +10,7 @@ export default function WatermarkPage() {
   const [file, setFile] = useState(null);
   const [result, setResult] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [text, setText] = useState("CONFIDENTIAL");
   const [opacity, setOpacity] = useState(15);
   const [fontSize, setFontSize] = useState(60);
@@ -23,7 +24,7 @@ export default function WatermarkPage() {
     try {
       const res = await addWatermark(file, text, { opacity: opacity / 100, fontSize, rotation });
       setResult(res);
-    } catch (e) { alert("Error: " + e.message); }
+    } catch (e) { setError(e?.name === "EncryptedDocumentError" ? e.message : (e?.message || String(e))); }
     setProcessing(false);
   };
 
@@ -61,6 +62,7 @@ export default function WatermarkPage() {
                 <button className="btn-primary" onClick={handleProcess} disabled={processing}>
                   {processing ? "Adding watermark..." : "Add Watermark"}
                 </button>
+                {error && <div className="ed-error">{error}</div>}
               </div>
             )}
           </>

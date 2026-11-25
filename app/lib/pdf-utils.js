@@ -1,4 +1,15 @@
-import { PDFDocument, degrees, rgb, StandardFonts, PDFName, PDFString } from "pdf-lib";
+import { PDFDocument, degrees, rgb, StandardFonts } from "pdf-lib";
+
+/**
+ * Every function that REWRITES a document must refuse an encrypted one.
+ * pdf-lib's `ignoreEncryption` does not decrypt — it proceeds with ciphertext,
+ * so rewriting produces a corrupt file while reporting success.
+ */
+async function guard(arrayBuffer) {
+  const { assertNotEncrypted } = await import("./pdf/security/detect.js");
+  await assertNotEncrypted(arrayBuffer);
+  return arrayBuffer;
+}
 
 /**
  * Merge multiple PDF files into one
@@ -12,6 +23,7 @@ export async function mergePDFs(files, onProgress = () => {}) {
 
   for (let i = 0; i < files.length; i++) {
     const arrayBuffer = await files[i].arrayBuffer();
+  await guard(arrayBuffer);
     const pdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
     const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
     pages.forEach((page) => mergedPdf.addPage(page));
@@ -35,6 +47,7 @@ export async function mergePDFs(files, onProgress = () => {}) {
  */
 export async function splitPDF(file, rangeStr = "all") {
   const arrayBuffer = await file.arrayBuffer();
+  await guard(arrayBuffer);
   const srcPdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   const totalPages = srcPdf.getPageCount();
   const results = [];
@@ -75,23 +88,28 @@ export async function splitPDF(file, rangeStr = "all") {
  * @param {File} file - PDF File object
  * @returns {Promise<{blob: Blob, originalSize: number, compressedSize: number, pageCount: number}>}
  */
-export async function compressPDF(file) {
+export async function compressPDF(file, options = {}) {
+  const { compressPdf, createBrowserImageCodec } = await import("./pdf/optimize/compress.js");
   const arrayBuffer = await file.arrayBuffer();
-  const originalSize = arrayBuffer.byteLength;
-  const pdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
 
-  // Save with optimizations — pdf-lib produces smaller output by default
-  // because it doesn't copy unused objects
-  const pdfBytes = await pdf.save({
-    useObjectStreams: true,
-    addDefaultPage: false,
+  const probe = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  const pageCount = probe.getPageCount();
+
+  const result = await compressPdf(arrayBuffer, {
+    preset: options.preset || "balanced",
+    recompressImage: options.recompressImage ?? createBrowserImageCodec(),
+    onProgress: options.onProgress,
   });
 
   return {
-    blob: new Blob([pdfBytes], { type: "application/pdf" }),
-    originalSize,
-    compressedSize: pdfBytes.byteLength,
-    pageCount: pdf.getPageCount(),
+    blob: new Blob([result.bytes], { type: "application/pdf" }),
+    originalSize: result.originalSize,
+    compressedSize: result.compressedSize,
+    saved: result.saved,
+    ratio: result.ratio,
+    unchanged: result.unchanged,
+    stats: result.stats,
+    pageCount,
   };
 }
 
@@ -145,31 +163,44 @@ export async function imagesToPDF(imageFiles, onProgress = () => {}) {
 }
 
 /**
- * Rotate pages in a PDF
- * @param {File} file - PDF File object
- * @param {number} angle - Rotation angle (90, 180, 270)
- * @param {number[]|null} pageIndices - Specific pages to rotate (null = all)
- * @returns {Promise<{blob: Blob, pageCount: number}>}
+ * Rotate pages in a PDF.
+ *
+ * @param {File} file
+ * @param {number|Record<number, number>} angle
+ *        A single angle applied to `pageIndices`, or a map of pageIndex -> angle
+ *        so different pages can be turned different ways in one pass.
+ * @param {number[]|null} pageIndices  which pages (null = all). Ignored when
+ *        `angle` is a per-page map.
+ * @returns {Promise<{blob: Blob, pageCount: number, rotated: number}>}
  */
 export async function rotatePDF(file, angle = 90, pageIndices = null) {
   const arrayBuffer = await file.arrayBuffer();
+  await guard(arrayBuffer);
   const pdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   const pages = pdf.getPages();
 
-  const indicesToRotate = pageIndices || pages.map((_, i) => i);
+  const perPage = typeof angle === "object" && angle !== null;
+  const targets = perPage
+    ? Object.keys(angle).map(Number)
+    : (pageIndices || pages.map((_, i) => i));
 
-  indicesToRotate.forEach((idx) => {
-    if (idx >= 0 && idx < pages.length) {
-      const page = pages[idx];
-      const currentRotation = page.getRotation().angle;
-      page.setRotation(degrees(currentRotation + angle));
-    }
-  });
+  let rotated = 0;
+  for (const idx of targets) {
+    if (!(idx >= 0 && idx < pages.length)) continue;
+    const delta = perPage ? Number(angle[idx]) || 0 : angle;
+    if (!delta) continue;
+    const page = pages[idx];
+    const current = page.getRotation().angle;
+    // PDF only stores multiples of 90, normalised to 0-359
+    page.setRotation(degrees((((current + delta) % 360) + 360) % 360));
+    rotated++;
+  }
 
   const pdfBytes = await pdf.save();
   return {
     blob: new Blob([pdfBytes], { type: "application/pdf" }),
     pageCount: pages.length,
+    rotated,
   };
 }
 
@@ -189,6 +220,7 @@ export async function addPageNumbers(file, options = {}) {
   } = options;
 
   const arrayBuffer = await file.arrayBuffer();
+  await guard(arrayBuffer);
   const pdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const pages = pdf.getPages();
@@ -247,6 +279,7 @@ export async function addWatermark(file, text, options = {}) {
   } = options;
 
   const arrayBuffer = await file.arrayBuffer();
+  await guard(arrayBuffer);
   const pdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   const font = await pdf.embedFont(StandardFonts.HelveticaBold);
   const pages = pdf.getPages();
@@ -274,55 +307,61 @@ export async function addWatermark(file, text, options = {}) {
 }
 
 /**
- * Unlock a password-protected PDF
- * @param {File} file - PDF File object
- * @param {string} password - PDF password
- * @returns {Promise<{blob: Blob, pageCount: number}>}
+ * Remove password protection from a PDF the user can open.
+ *
+ * This replaces an implementation that passed a `password` option to
+ * pdf-lib's loader — an option pdf-lib does not have — so unlocking silently
+ * did nothing. See app/lib/pdf/security/unlock.js.
+ *
+ * @param {File} file
+ * @param {string} password
+ * @returns {Promise<{blob: Blob, pageCount: number, wasEncrypted: boolean, revision: number, cipher: string}>}
  */
 export async function unlockPDF(file, password) {
+  const { unlockPdf } = await import("./pdf/security/unlock.js");
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await PDFDocument.load(arrayBuffer, {
-    ignoreEncryption: true,
-    password,
-  });
+  const result = await unlockPdf(arrayBuffer, password);
 
-  // Remove encryption by saving without it
-  const pdfBytes = await pdf.save();
+  const doc = await PDFDocument.load(result.bytes, { ignoreEncryption: true });
   return {
-    blob: new Blob([pdfBytes], { type: "application/pdf" }),
-    pageCount: pdf.getPageCount(),
+    blob: new Blob([result.bytes], { type: "application/pdf" }),
+    pageCount: doc.getPageCount(),
+    wasEncrypted: result.wasEncrypted,
+    revision: result.revision,
+    cipher: result.cipher,
   };
 }
 
 /**
- * Protect a PDF with password metadata
- * @param {File} file - PDF File object
- * @param {string} password - Password to set
- * @returns {Promise<{blob: Blob, pageCount: number}>}
+ * Encrypt a PDF with a password (AES-256, ISO 32000-2 revision 6).
+ *
+ * This replaces an earlier implementation that wrote the password in PLAIN TEXT
+ * into an /Encrypt dictionary with no cipher applied — the resulting file
+ * opened in any reader. See app/lib/pdf/security/.
+ *
+ * @param {File} file
+ * @param {string} password
+ * @param {object} [options] { ownerPassword, allow: { print, copy, modify, ... } }
+ * @returns {Promise<{blob: Blob, pageCount: number, permissions: number}>}
  */
-export async function protectPDF(file, password) {
+export async function protectPDF(file, password, options = {}) {
+  const { protectPdf } = await import("./pdf/security/protect.js");
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
 
-  // Set document metadata to indicate protection
-  pdf.setTitle(pdf.getTitle() || "Protected Document");
-  pdf.setProducer("SmartPDF - Protected");
+  // page count is read before encryption, since afterwards it needs the password
+  const probe = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  const pageCount = probe.getPageCount();
 
-  // Use pdf-lib's encrypt dict approach (basic protection)
-  const encryptDict = pdf.context.obj({
-    Filter: PDFName.of("Standard"),
-    V: 1,
-    R: 2,
-    O: PDFString.of(password),
-    U: PDFString.of(password),
-    P: -4,
+  const { bytes, permissions } = await protectPdf(arrayBuffer, {
+    userPassword: password,
+    ownerPassword: options.ownerPassword,
+    allow: options.allow || {},
   });
-  pdf.context.trailerInfo.Encrypt = pdf.context.register(encryptDict);
 
-  const pdfBytes = await pdf.save();
   return {
-    blob: new Blob([pdfBytes], { type: "application/pdf" }),
-    pageCount: pdf.getPageCount(),
+    blob: new Blob([bytes], { type: "application/pdf" }),
+    pageCount,
+    permissions,
   };
 }
 
@@ -334,6 +373,7 @@ export async function protectPDF(file, password) {
  */
 export async function organizePDF(file, pageOrder) {
   const arrayBuffer = await file.arrayBuffer();
+  await guard(arrayBuffer);
   const srcPdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   const newPdf = await PDFDocument.create();
 
@@ -357,6 +397,7 @@ export async function organizePDF(file, pageOrder) {
 export async function embedSignature(file, signatureImageBytes, position) {
   const { x, y, width, height, pageIndex = 0 } = position;
   const arrayBuffer = await file.arrayBuffer();
+  await guard(arrayBuffer);
   const pdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
 
   const sigImage = await pdf.embedPng(signatureImageBytes);
@@ -379,6 +420,7 @@ export async function embedSignature(file, signatureImageBytes, position) {
  */
 export async function editPDF(file, annotations) {
   const arrayBuffer = await file.arrayBuffer();
+  await guard(arrayBuffer);
   const pdf = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const pages = pdf.getPages();
