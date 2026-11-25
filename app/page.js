@@ -26,6 +26,7 @@ import {
   Table,
   Presentation,
   ScanText,
+  Highlighter,
 } from "lucide-react";
 
 const tools = [
@@ -44,6 +45,7 @@ const tools = [
   { name: "Unlock PDF", description: "Remove password security from your PDF documents.", Icon: Unlock, iconClass: "icon-unlock", href: "/tools/unlock", tag: "free" },
   { name: "Organize PDF", description: "Reorder, delete, and rearrange pages visually.", Icon: Layers, iconClass: "icon-organize", href: "/tools/organize", tag: "free" },
   { name: "Sign PDF", description: "Draw or type your signature and place it on any PDF.", Icon: PenLine, iconClass: "icon-sign", href: "/tools/sign", tag: "free" },
+  { name: "Redact PDF", description: "Permanently delete text and images — not just cover them with a box.", Icon: Highlighter, iconClass: "icon-redact", href: "/tools/redact", tag: "free" },
   // Row 4 — Edit & AI
   { name: "Edit PDF", description: "Add text, shapes, and annotations to your PDF document.", Icon: Edit3, iconClass: "icon-edit", href: "/tools/edit", tag: "free" },
   { name: "PDF to Word", description: "Convert PDF to editable Word documents using AI.", Icon: FileText, iconClass: "icon-toword", href: "/tools/pdf-to-word", tag: "ai" },
@@ -58,7 +60,7 @@ const features = [
     Icon: Shield,
     title: "100% Private",
     description:
-      "All processing happens in your browser. Your files never leave your device.",
+      "Every editing and conversion tool runs in your browser — your files never leave your device. The AI tools are marked where they don't.",
   },
   {
     Icon: Zap,
@@ -202,9 +204,9 @@ export default function Home() {
       <footer className="footer">
         <p>© 2026 SmartPDF. All rights reserved.</p>
         <div className="footer-links">
-          <a href="#">Privacy Policy</a>
-          <a href="#">Terms of Service</a>
-          <a href="#">Contact</a>
+          <Link href="/privacy">Privacy Policy</Link>
+          <Link href="/terms">Terms of Service</Link>
+          <Link href="/contact">Contact</Link>
         </div>
       </footer>
     </>

@@ -10,6 +10,7 @@ export default function PageNumbersPage() {
   const [file, setFile] = useState(null);
   const [result, setResult] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [position, setPosition] = useState("bottom-center");
   const [format, setFormat] = useState("1");
   const [fontSize, setFontSize] = useState(12);
@@ -26,7 +27,7 @@ export default function PageNumbersPage() {
         startPage: skipFirst ? 1 : 0,
       });
       setResult(res);
-    } catch (e) { alert("Error: " + e.message); }
+    } catch (e) { setError(e?.name === "EncryptedDocumentError" ? e.message : (e?.message || String(e))); }
     setProcessing(false);
   };
 
@@ -76,6 +77,7 @@ export default function PageNumbersPage() {
                 <button className="btn-primary" onClick={handleProcess} disabled={processing}>
                   {processing ? "Adding numbers..." : "Add Page Numbers"}
                 </button>
+                {error && <div className="ed-error">{error}</div>}
               </div>
             )}
           </>

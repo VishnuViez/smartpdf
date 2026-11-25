@@ -8,10 +8,12 @@ import Dropzone from "../../components/Dropzone";
 import FileList from "../../components/FileList";
 import { downloadBlob } from "../../lib/pdf-utils";
 import JSZip from "jszip";
+import { loadPdfjs, PDFJS_ASSETS } from "../../lib/pdf/pdfjs.js";
 
 export default function PDFToImagesPage() {
   const [file, setFile] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
 
@@ -32,11 +34,10 @@ export default function PDFToImagesPage() {
     setResult(null);
 
     try {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+      const pdfjsLib = await loadPdfjs();
 
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, ...PDFJS_ASSETS }).promise;
       const images = [];
 
       for (let i = 1; i <= pdf.numPages; i++) {
@@ -64,7 +65,7 @@ export default function PDFToImagesPage() {
 
       setResult({ images, pageCount: pdf.numPages });
     } catch (err) {
-      alert("Error converting PDF: " + err.message);
+      setError(err?.message || String(err));
     } finally {
       setProcessing(false);
     }
@@ -145,6 +146,7 @@ export default function PDFToImagesPage() {
                     <div className="progress-text">
                       Rendering pages... {progress}%
                     </div>
+                    {error && <div className="ed-error">{error}</div>}
                   </div>
                 )}
               </>

@@ -11,6 +11,7 @@ import { imagesToPDF, formatFileSize, downloadBlob } from "../../lib/pdf-utils";
 export default function ImagesToPDFPage() {
   const [files, setFiles] = useState([]);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
 
@@ -40,7 +41,7 @@ export default function ImagesToPDFPage() {
       const res = await imagesToPDF(files, setProgress);
       setResult(res);
     } catch (err) {
-      alert("Error converting images: " + err.message);
+      setError(err?.message || String(err));
     } finally {
       setProcessing(false);
     }
@@ -113,6 +114,7 @@ export default function ImagesToPDFPage() {
                   ></div>
                 </div>
                 <div className="progress-text">Converting... {progress}%</div>
+                {error && <div className="ed-error">{error}</div>}
               </div>
             )}
           </>

@@ -4,12 +4,15 @@ import Link from "next/link";
 import { ArrowLeft, Presentation, CheckCircle, Download, Bot, Loader2 } from "lucide-react";
 import Header from "../../components/Header";
 import Dropzone from "../../components/Dropzone";
+import CloudNotice from "../../components/CloudNotice";
 import { formatFileSize, downloadBlob } from "../../lib/pdf-utils";
+import { loadPdfjs, PDFJS_ASSETS } from "../../lib/pdf/pdfjs.js";
 
 export default function PdfToPptxPage() {
   const [file, setFile] = useState(null);
   const [result, setResult] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [progress, setProgress] = useState("");
 
   const handleFiles = (files) => { setFile(files[0]); setResult(null); };
@@ -19,14 +22,13 @@ export default function PdfToPptxPage() {
     setProcessing(true);
     setProgress("Rendering PDF pages...");
     try {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+      const pdfjsLib = await loadPdfjs();
 
       const PptxGenJS = (await import("pptxgenjs")).default;
       const pres = new PptxGenJS();
 
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, ...PDFJS_ASSETS }).promise;
 
       for (let i = 1; i <= pdf.numPages; i++) {
         setProgress(`Converting page ${i} of ${pdf.numPages}...`);
@@ -46,7 +48,7 @@ export default function PdfToPptxPage() {
       setProgress("Generating PowerPoint...");
       const pptxBlob = await pres.write({ outputType: "blob" });
       setResult({ blob: pptxBlob, size: pptxBlob.size, slides: pdf.numPages });
-    } catch (e) { alert("Error: " + e.message); }
+    } catch (e) { setError(e?.message || String(e)); }
     setProcessing(false);
     setProgress("");
   };
@@ -64,6 +66,7 @@ export default function PdfToPptxPage() {
 
         {!result ? (
           <>
+            <CloudNotice />
             <Dropzone onFiles={handleFiles} accept=".pdf" multiple={false} label="Drop your PDF file here" sublabel="Each page becomes a slide" />
             {file && (
               <div className="tool-controls">
@@ -73,6 +76,7 @@ export default function PdfToPptxPage() {
                 <button className="btn-primary" onClick={handleProcess} disabled={processing}>
                   {processing ? <><Loader2 size={16} className="spin" /> {progress}</> : "Convert to PowerPoint"}
                 </button>
+                {error && <div className="ed-error">{error}</div>}
               </div>
             )}
           </>

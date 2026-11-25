@@ -4,12 +4,15 @@ import Link from "next/link";
 import { ArrowLeft, Table, CheckCircle, Download, Bot, Loader2 } from "lucide-react";
 import Header from "../../components/Header";
 import Dropzone from "../../components/Dropzone";
+import CloudNotice from "../../components/CloudNotice";
 import { formatFileSize, downloadBlob } from "../../lib/pdf-utils";
+import { loadPdfjs, PDFJS_ASSETS } from "../../lib/pdf/pdfjs.js";
 
 export default function PdfToExcelPage() {
   const [file, setFile] = useState(null);
   const [result, setResult] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [progress, setProgress] = useState("");
 
   const handleFiles = (files) => { setFile(files[0]); setResult(null); };
@@ -19,11 +22,10 @@ export default function PdfToExcelPage() {
     setProcessing(true);
     setProgress("Rendering PDF pages...");
     try {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+      const pdfjsLib = await loadPdfjs();
 
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, ...PDFJS_ASSETS }).promise;
       const allTables = [];
 
       for (let i = 1; i <= pdf.numPages; i++) {
@@ -43,7 +45,10 @@ export default function PdfToExcelPage() {
           body: JSON.stringify({ imageBase64: base64, operation: "to-excel" }),
         });
 
-        if (!res.ok) throw new Error("AI processing failed");
+        if (!res.ok) {
+          const detail = await res.json().catch(() => null);
+          throw new Error(detail?.error || `The conversion service returned ${res.status}`);
+        }
         const data = await res.json();
         try {
           const cleaned = data.text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
@@ -72,7 +77,7 @@ export default function PdfToExcelPage() {
       const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
       const blob = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       setResult({ blob, size: blob.size, sheets: allTables.length });
-    } catch (e) { alert("Error: " + e.message); }
+    } catch (e) { setError(e?.message || String(e)); }
     setProcessing(false);
     setProgress("");
   };
@@ -90,6 +95,7 @@ export default function PdfToExcelPage() {
 
         {!result ? (
           <>
+            <CloudNotice />
             <Dropzone onFiles={handleFiles} accept=".pdf" multiple={false} label="Drop your PDF with tables" sublabel="AI will detect and extract table data" />
             {file && (
               <div className="tool-controls">
@@ -99,6 +105,7 @@ export default function PdfToExcelPage() {
                 <button className="btn-primary" onClick={handleProcess} disabled={processing}>
                   {processing ? <><Loader2 size={16} className="spin" /> {progress}</> : "Convert to Excel"}
                 </button>
+                {error && <div className="ed-error">{error}</div>}
               </div>
             )}
           </>

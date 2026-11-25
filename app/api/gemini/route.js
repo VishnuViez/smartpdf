@@ -8,7 +8,7 @@ export async function POST(request) {
     const { imageBase64, operation, mimeType = "image/png" } = await request.json();
 
     if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
+      return NextResponse.json({ error: "This tool needs a Gemini API key, which is not configured on this server. Set GEMINI_API_KEY to enable it. Every other SmartPDF tool works without one." }, { status: 500 });
     }
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });

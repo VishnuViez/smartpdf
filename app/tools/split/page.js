@@ -14,6 +14,7 @@ export default function SplitPage() {
   const [splitMode, setSplitMode] = useState("all");
   const [rangeStr, setRangeStr] = useState("");
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
 
   const handleFilesAdded = useCallback((newFiles) => {
@@ -36,7 +37,7 @@ export default function SplitPage() {
       const res = await splitPDF(file, range);
       setResult(res);
     } catch (err) {
-      alert("Error splitting PDF: " + err.message);
+      setError(err?.message || String(err));
     } finally {
       setProcessing(false);
     }
@@ -210,6 +211,7 @@ export default function SplitPage() {
                 Split Another
               </button>
             </div>
+            {error && <div className="ed-error">{error}</div>}
           </div>
         )}
       </div>

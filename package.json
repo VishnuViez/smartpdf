@@ -6,7 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sync:pdfjs": "node scripts/sync-pdfjs-assets.mjs",
+    "postinstall": "node scripts/sync-pdfjs-assets.mjs",
+    "test": "node .claude/testkit/run.mjs",
+    "test:fixtures": "node .claude/testkit/make-fixtures.mjs",
+    "test:watch": "node --test --watch .claude/tests",
+    "verify": "npm run lint && npm test"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

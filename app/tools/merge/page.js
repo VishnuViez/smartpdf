@@ -11,6 +11,7 @@ import { mergePDFs, formatFileSize, downloadBlob } from "../../lib/pdf-utils";
 export default function MergePage() {
   const [files, setFiles] = useState([]);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState(null);
 
@@ -42,7 +43,7 @@ export default function MergePage() {
       const res = await mergePDFs(files, setProgress);
       setResult(res);
     } catch (err) {
-      alert("Error merging PDFs: " + err.message);
+      setError(err?.message || String(err));
     } finally {
       setProcessing(false);
     }
@@ -130,6 +131,7 @@ export default function MergePage() {
                   ></div>
                 </div>
                 <div className="progress-text">Processing... {progress}%</div>
+                {error && <div className="ed-error">{error}</div>}
               </div>
             )}
           </>
