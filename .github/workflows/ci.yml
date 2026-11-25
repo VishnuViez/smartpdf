@@ -1,65 +1,128 @@
-# ------------------------------------------------------------------
-# SmartPDF – Continuous Integration (CI)
+# ---------------------------------------------------------------------------
+# SmartPDF — Continuous Integration
 #
-# What this does, in plain words:
-#   Every time code is pushed to `main`, or someone opens a pull
-#   request, GitHub borrows a fresh Linux computer, downloads the
-#   code, installs the packages, and checks two things:
-#     1. Lint  – does the code follow the project's style/safety rules?
-#     2. Build – does the Next.js app actually compile?
-#   If either step fails, GitHub shows a red ❌ on the commit/PR.
-#   If both pass, you get a green ✅.
+# What this proves on every change:
+#   1. The code passes ESLint.
+#   2. The full test suite passes (371 tests / 56 suites) on every Node
+#      version we care about.
+#   3. The production build compiles.
 #
-# Deployment (the "CD" part) is done by Netlify (see netlify.toml),
-# which builds and publishes the site whenever `main` changes.
-# ------------------------------------------------------------------
+# What it deliberately does NOT do: deploy. Netlify owns deployment, and the
+# gate that stops a red build reaching production is branch protection on
+# `main`, not this file. See docs/ci-cd.md.
+# ---------------------------------------------------------------------------
 
-name: CI                      # The name shown in the repo's "Actions" tab
+name: CI
 
-on:                           # WHEN should this run?
+# ---------------------------------------------------------------------------
+# WHEN this runs.
+#
+# `pull_request` is the one that earns its keep: it tests the MERGE RESULT
+# (your branch merged into main), not your branch alone. That catches the
+# case where your change and someone else's are each fine but break together.
+# ---------------------------------------------------------------------------
+on:
   push:
-    branches: [main]          #   - on every push to main
-  pull_request:               #   - on every pull request (any branch)
-  workflow_dispatch:          #   - and manually, via a "Run workflow" button
+    branches: [main]
+  pull_request:
+  workflow_dispatch: # adds a manual "Run workflow" button
 
-# If you push twice quickly, cancel the older run instead of wasting time on it
+# Push twice in quick succession and the older run is cancelled rather than
+# burning a runner on a commit nobody is waiting for. Keyed per branch, so
+# your push never cancels someone else's.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege. The default token can WRITE to the repo; these jobs only
+# need to read it. On a public repo this matters: a malicious dependency that
+# runs during `npm ci` inherits whatever this token can do.
 permissions:
-  contents: read              # The job only needs to READ the code (safer)
+  contents: read
 
 jobs:
-  build:                      # A "job" = one set of steps on one machine
-    name: Lint & build
-    runs-on: ubuntu-latest    # The borrowed computer: a fresh Ubuntu Linux VM
-    timeout-minutes: 15       # Give up if something hangs
+  # -------------------------------------------------------------------------
+  # JOB 1 — lint and test.
+  #
+  # Runs on a matrix of Node versions. 24 is what Netlify builds with (see
+  # .nvmrc); 26 is what the project is developed on. Testing both means a
+  # version-specific break is caught here rather than on the deploy.
+  # -------------------------------------------------------------------------
+  verify:
+    name: Lint & test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # a hung test should fail, not run for 6 hours
+
+    strategy:
+      # Don't cancel Node 26 just because Node 24 failed — knowing whether a
+      # failure is version-specific is most of the diagnosis.
+      fail-fast: false
+      matrix:
+        node: ['24', '26']
 
     steps:
-      # 1. Download this repo's code onto the VM
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
-      # 2. Install Node.js and remember downloaded npm packages between runs
-      #    (the cache makes later runs much faster)
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
+          # Caches ~/.npm keyed on package-lock.json. Install is the slowest
+          # step in this pipeline, so this is the single highest-value line.
           cache: npm
 
-      # 3. Install exact package versions from package-lock.json
-      #    (`npm ci` is the "clean install" made for CI machines)
+      # `npm ci` not `npm install`: it installs the lockfile EXACTLY and errors
+      # if package.json and the lockfile disagree, instead of quietly resolving
+      # a new version. Reproducibility is the entire point of CI.
       - name: Install dependencies
         run: npm ci
 
-      # 4. Check code quality with ESLint (fails on errors, not on warnings)
+      # Belt and braces. This normally runs via `postinstall`, but the tests
+      # hard-depend on public/pdfjs/{cmaps,standard_fonts} (gitignored, so it
+      # does not come from the checkout) and npm is progressively restricting
+      # lifecycle scripts. Running it explicitly means a skipped hook shows up
+      # as a clear failure here rather than as a baffling font error later.
+      - name: Generate pdf.js assets
+        run: npm run sync:pdfjs
+
       - name: Lint
         run: npm run lint
 
-      # 5. Make sure the production build compiles
+      - name: Test
+        run: npm test
+
+  # -------------------------------------------------------------------------
+  # JOB 2 — production build.
+  #
+  # A separate job, so it runs in PARALLEL with the tests on its own VM
+  # rather than queuing behind them. Jobs share nothing by default: this one
+  # re-checks out and re-installs. That isolation is a feature — it is also
+  # why you pass things between jobs with artifacts, not with the filesystem.
+  # -------------------------------------------------------------------------
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          # Read from .nvmrc — the same file Netlify reads. One source of
+          # truth means CI cannot drift from production.
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Build
         run: npm run build
         env:
-          NEXT_TELEMETRY_DISABLED: 1   # Don't send Next.js usage stats from CI
+          NEXT_TELEMETRY_DISABLED: 1
+          # Build-time env vars would go here. Note these are NOT secrets —
+          # anything baked into a client bundle is public by definition.
